@@ -35,7 +35,7 @@ apps.add_middleware(
 rag = ProductRAG()
 
 if STATIC.exists():
-    apps.mount("../static", StaticFiles(directory=str(STATIC)), name="static")
+    apps.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 
 class ChatRequest(BaseModel):
