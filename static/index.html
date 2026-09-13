@@ -287,7 +287,7 @@
         addMsg(data.answer || "پاسخی دریافت نشد.", "bot", data.products);
       } catch (e) {
         document.getElementById("typing")?.remove();
-        addMsg("ارتباط با سرور برقرار نشد. مطمئن شو API در حال اجراست.", "bot");
+        addMsg("ارتباط با سرور برقرار نشد.", "bot");
       } finally {
         sendBtn.disabled = false;
         input.focus();

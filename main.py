@@ -20,7 +20,7 @@ from app.config import (GROQ_API_KEY, LLM_MODEL,
                  USE_OLLAMA,
                  XAI_API_KEY, )
 
-BASE = Path(__file__).resolve().parent.parent
+BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
 
 apps = FastAPI(title="Arya Sanat AI Consultant", version="1.1.0")
@@ -101,6 +101,7 @@ def call_cloud_llm(message: str, context: str) -> str | None:
         resp = client.chat.completions.create(
             model=model,
             messages=[
+
                 {
                     "role": "system",
                     "content": (

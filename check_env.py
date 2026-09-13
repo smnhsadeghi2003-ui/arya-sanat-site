@@ -13,7 +13,7 @@ if env.exists():
         else:
             print(line)
 print("---")
-from app import OPENAI_API_KEY, GROQ_API_KEY, llm_status
+from app.config import OPENAI_API_KEY, GROQ_API_KEY, llm_status
 print("وضعیت:", llm_status())
 if not (OPENAI_API_KEY or GROQ_API_KEY):
     print("\nمشکل: کلید خالی است.")

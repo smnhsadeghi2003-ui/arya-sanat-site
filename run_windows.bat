@@ -37,5 +37,5 @@ echo.
 echo [4/4] اجرای سرور...
 echo سایت: http://127.0.0.1:8000
 echo.
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:apps --reload --host 0.0.0.0 --port 8000
 pause
