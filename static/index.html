@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>آریا صنعت | مشاور هوشمند</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --panel2: #243044;
+      --accent: #e8a838;
+      --accent2: #f0c060;
+      --text: #e8eef7;
+      --muted: #8b9bb4;
+      --bot: #1e3a5f;
+      --user: #2d4a3e;
+      --border: #2a3a50;
+      --danger: #e85d5d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Vazirmatn", Tahoma, sans-serif;
+      background: linear-gradient(160deg, #0b1018 0%, #152030 50%, #0f1a28 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 8px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo {
+      width: 48px; height: 48px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), #c47a1a);
+      display: grid; place-items: center;
+      font-weight: 700; color: #1a1205; font-size: 18px;
+      box-shadow: 0 4px 20px rgba(232,168,56,.35);
+    }
+    .brand h1 { font-size: 1.15rem; font-weight: 700; }
+    .brand p { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+    .badge {
+      font-size: .75rem;
+      background: var(--panel2);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 999px;
+      color: var(--accent2);
+    }
+    .chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 4px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      line-height: 1.7;
+      font-size: .95rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      animation: fadeIn .25s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+    .msg.bot {
+      align-self: flex-start;
+      background: var(--bot);
+      border: 1px solid #2a4a70;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: var(--user);
+      border: 1px solid #3a5c4e;
+      border-bottom-left-radius: 4px;
+    }
+    .msg a { color: var(--accent2); }
+    .products {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: .85rem;
+    }
+    .card strong { color: var(--accent2); }
+    .card a {
+      display: inline-block;
+      margin-top: 6px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: .8rem;
+    }
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 8px 0 12px;
+    }
+    .chip {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: .8rem;
+      cursor: pointer;
+      transition: .15s;
+      font-family: inherit;
+    }
+    .chip:hover {
+      border-color: var(--accent);
+      color: var(--accent2);
+    }
+    .composer {
+      display: flex;
+      gap: 10px;
+      padding: 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 -4px 30px rgba(0,0,0,.25);
+    }
+    .composer input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: .95rem;
+      padding: 8px;
+    }
+    .composer button {
+      background: linear-gradient(135deg, var(--accent), #c47a1a);
+      border: none;
+      color: #1a1205;
+      font-weight: 700;
+      padding: 10px 20px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: .15s;
+    }
+    .composer button:hover { filter: brightness(1.08); }
+    .composer button:disabled { opacity: .5; cursor: wait; }
+    .typing {
+      align-self: flex-start;
+      color: var(--muted);
+      font-size: .85rem;
+      padding: 4px 8px;
+    }
+    footer {
+      text-align: center;
+      font-size: .75rem;
+      color: var(--muted);
+      padding: 12px 0 4px;
+    }
+    footer a { color: var(--accent2); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">آس</div>
+        <div>
+          <h1>آریا صنعت</h1>
+          <p>مشاور هوشمند ابزارآلات صنعتی</p>
+        </div>
+      </div>
+      <div class="badge" id="status">در حال اتصال...</div>
+    </header>
+
+    <div class="chat" id="chat"></div>
+
+    <div class="suggestions" id="suggestions">
+      <button class="chip" data-q="سلام">سلام</button>
+      <button class="chip" data-q="قلاویز لوله NAREX">قلاویز لوله NAREX</button>
+      <button class="chip" data-q="دنباله SK داندریا">دنباله SK داندریا</button>
+      <button class="chip" data-q="ساعت اندیکاتور کورس ۱۰۰">ساعت اندیکاتور</button>
+      <button class="chip" data-q="مته HSS برای فولاد">مته HSS</button>
+      <button class="chip" data-q="شماره تماس و آدرس">تماس با ما</button>
+    </div>
+
+    <form class="composer" id="form">
+      <input id="input" type="text" placeholder="سوالت را بنویس... مثلاً قلاویز مناسب لوله" autocomplete="off" />
+      <button type="submit" id="send">ارسال</button>
+    </form>
+
+    <footer>
+      آریا صنعت گنج ·
+      <a href="https://arya-sanat.com" target="_blank" rel="noopener">arya-sanat.com</a>
+      · ۰۲۱-۶۶۷۲۲۵۰۴
+    </footer>
+  </div>
+
+  <script>
+    const chat = document.getElementById("chat");
+    const form = document.getElementById("form");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const statusEl = document.getElementById("status");
+
+    function addMsg(text, who, products) {
+      const div = document.createElement("div");
+      div.className = "msg " + who;
+      // escape HTML then linkify
+      let html = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      html = html.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+      div.innerHTML = html;
+
+      if (products && products.length) {
+        const box = document.createElement("div");
+        box.className = "products";
+        products.slice(0, 4).forEach((p) => {
+          const c = document.createElement("div");
+          c.className = "card";
+          c.innerHTML =
+            "<strong>" + (p.name || "") + "</strong><br/>" +
+            (p.brand ? p.brand + " · " : "") +
+            (p.price || "تماس بگیرید") +
+            (p.url ? '<br/><a href="' + p.url + '" target="_blank">مشاهده محصول ←</a>' : "");
+          box.appendChild(c);
+        });
+        div.appendChild(box);
+      }
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    async function ask(message) {
+      if (!message.trim()) return;
+      addMsg(message, "user");
+      input.value = "";
+      sendBtn.disabled = true;
+      const typing = document.createElement("div");
+      typing.className = "typing";
+      typing.id = "typing";
+      typing.textContent = "در حال بررسی...";
+      chat.appendChild(typing);
+      chat.scrollTop = chat.scrollHeight;
+
+      try {
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, top_k: 5 }),
+        });
+        const data = await res.json();
+        document.getElementById("typing")?.remove();
+        addMsg(data.answer || "پاسخی دریافت نشد.", "bot", data.products);
+      } catch (e) {
+        document.getElementById("typing")?.remove();
+        addMsg("ارتباط با سرور برقرار نشد. مطمئن شو API در حال اجراست.", "bot");
+      } finally {
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    }
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      ask(input.value);
+    });
+
+    document.querySelectorAll(".chip").forEach((btn) => {
+      btn.addEventListener("click", () => ask(btn.dataset.q));
+    });
+
+    fetch("/health")
+      .then((r) => r.json())
+      .then((d) => {
+        statusEl.textContent = d.products + " محصول آماده";
+        statusEl.style.color = "#7dcea0";
+      })
+      .catch(() => {
+        statusEl.textContent = "آفلاین";
+        statusEl.style.color = "var(--danger)";
+      });
+
+    addMsg(
+      "سلام! من مشاور هوشمند آریا صنعت هستم.\nهرسوالی درمورد ابزارها و شرکت دارید لطفا بپرسید.",
+      "bot"
+    );
+  </script>
+</body>
+</html>
