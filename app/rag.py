@@ -1,606 +1,721 @@
-from __future__ import annotations
-
 import json
 import re
-from collections import Counter
+from pathlib import Path
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 from app.config import PRODUCTS_FILE, KNOWLEDGE_FILE
 
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity
-    HAS_SKLEARN = True
-except ImportError:
-    HAS_SKLEARN = False
-    import math
 
+# =========================================================
+# Normalization
+# =========================================================
 
-# ---------------------------------------------------------
-# Normalize
-# ---------------------------------------------------------
+def normalize_text(text):
+    """
+    یکسان‌سازی متن فارسی و اعداد
+    """
 
-def normalize(text: str) -> str:
-    text = str(text or "")
+    if text is None:
+        return ""
 
-    replacements = [
-        ("ي", "ی"),
-        ("ك", "ک"),
-        ("\u200c", " "),
-        ("ۀ", "ه"),
-        ("ة", "ه"),
-    ]
+    text = str(text)
 
-    for a, b in replacements:
-        text = text.replace(a, b)
+    # حروف عربی → فارسی
+    text = text.replace("ي", "ی")
+    text = text.replace("ى", "ی")
+    text = text.replace("ك", "ک")
 
-    text = text.lower()
+    # حذف نیم‌فاصله
+    text = text.replace("\u200c", " ")
 
-    # تبدیل اعداد فارسی و عربی به انگلیسی
+    # اعداد فارسی
     persian_digits = "۰۱۲۳۴۵۶۷۸۹"
-    arabic_digits = "٠١٢٣٤٥٦٧٨٩"
     english_digits = "0123456789"
 
     for p, e in zip(persian_digits, english_digits):
         text = text.replace(p, e)
 
-    for p, e in zip(arabic_digits, english_digits):
-        text = text.replace(p, e)
+    # اعداد عربی
+    arabic_digits = "٠١٢٣٤٥٦٧٨٩"
 
-    return re.sub(r"\s+", " ", text).strip()
+    for a, e in zip(arabic_digits, english_digits):
+        text = text.replace(a, e)
+
+    # فاصله‌های اضافی
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip().lower()
 
 
-# ---------------------------------------------------------
-# Technical intent detection
-# ---------------------------------------------------------
+# =========================================================
+# Intent detection
+# =========================================================
 
-INTENT_KEYWORDS = {
-    "drilling": [
+def detect_intent(query):
+    """
+    تشخیص نوع عملیات از سؤال کاربر
+    """
+
+    q = normalize_text(query)
+
+    drilling_words = [
         "سوراخ",
         "سوراخکاری",
         "سوراخ کاری",
         "مته",
-        "دریل",
-        "حفاری",
-        "ایجاد سوراخ",
-        "hole",
-        "drilling",
         "drill",
-    ],
+        "drilling",
+    ]
 
-    "tapping": [
+    tapping_words = [
         "قلاویز",
         "قلاویزکاری",
+        "قلاویز کاری",
         "رزوه داخلی",
-        "رزوه زنی",
-        "رزوه‌زنی",
-        "tapping",
+        "تپ",
         "tap",
-    ],
+        "tapping",
+    ]
 
-    "turning": [
-        "تراشکاری",
-        "تراش",
-        "turning",
-        "lathe",
-    ],
-
-    "milling": [
-        "فرزکاری",
+    milling_words = [
         "فرز",
+        "فرزکاری",
+        "فرز کاری",
+        "شیار",
         "milling",
         "mill",
-    ],
+    ]
 
-    "threading": [
-        "رزوه",
-        "رزوه زنی",
-        "رزوه‌زنی",
-        "threading",
-        "thread",
-    ],
+    turning_words = [
+        "تراش",
+        "تراشکاری",
+        "تراش کاری",
+        "الماس تراش",
+        "رنده تراش",
+        "turning",
+        "lathe",
+    ]
 
-    "center_drilling": [
+    center_drilling_words = [
         "مته مرغک",
         "مرغک",
+        "سوراخ مرکز",
+        "سوراخ مرکزی",
         "center drill",
         "center drilling",
-    ],
-}
+    ]
+
+    if any(word in q for word in center_drilling_words):
+        return "center_drilling"
+
+    if any(word in q for word in tapping_words):
+        return "tapping"
+
+    if any(word in q for word in milling_words):
+        return "milling"
+
+    if any(word in q for word in turning_words):
+        return "turning"
+
+    if any(word in q for word in drilling_words):
+        return "drilling"
+
+    return "general"
 
 
-# ---------------------------------------------------------
-# Product intent mapping
-# ---------------------------------------------------------
+# =========================================================
+# Diameter extraction
+# =========================================================
 
-INTENT_PRODUCT_KEYWORDS = {
-
-    "drilling": [
-        "مته",
-        "مته گرد",
-        "مته کبالت",
-        "مته hss",
-        "drill",
-        "drilling",
-        "سوراخکاری",
-    ],
-
-    "tapping": [
-        "قلاویز",
-        "tap",
-        "tapping",
-    ],
-
-    "turning": [
-        "الماس تراش",
-        "الماس",
-        "تراش",
-        "رنده",
-        "turning",
-    ],
-
-    "milling": [
-        "فرز",
-        "فرز انگشتی",
-        "milling",
-        "end mill",
-    ],
-
-    "threading": [
-        "قلاویز",
-        "حدیده",
-        "رزوه",
-        "thread",
-    ],
-
-    "center_drilling": [
-        "مته مرغک",
-        "مرغک",
-        "center drill",
-    ],
-}
-
-
-def detect_intent(query: str) -> str | None:
+def extract_diameter(query):
     """
-    تشخیص عملیات اصلی از سؤال کاربر.
+    استخراج قطر سوراخ از سؤال کاربر.
+
+    مثال:
+    سوراخ 30 میلی متر → 30
+    سوراخ ۱۲ میلی‌متر → 12
+    قطر 8mm → 8
     """
 
-    q = normalize(query)
+    q = normalize_text(query)
 
-    scores = {}
+    patterns = [
+        r"(?:سوراخ|قطر)\s*(?:با\s*)?(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
+        r"(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
+    ]
 
-    for intent, keywords in INTENT_KEYWORDS.items():
-        score = 0
+    for pattern in patterns:
+        match = re.search(pattern, q)
 
-        for keyword in keywords:
-            keyword_n = normalize(keyword)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
 
-            if keyword_n in q:
-                score += 1
-
-        if score > 0:
-            scores[intent] = score
-
-    if not scores:
-        return None
-
-    return max(scores, key=scores.get)
+    return None
 
 
-def product_matches_intent(product: dict, intent: str) -> bool:
+# =========================================================
+# Product text
+# =========================================================
+
+def get_product_text(product):
     """
-    بررسی می‌کند محصول با عملیات موردنظر سازگار است یا نه.
+    تمام اطلاعات متنی محصول را برای جستجو ترکیب می‌کند.
     """
 
-    if not intent:
+    fields = [
+        "name",
+        "brand",
+        "sku",
+        "category",
+        "price",
+        "short_description",
+        "description",
+        "features",
+        "advantages",
+        "applications",
+        "attributes",
+        "technical_specs",
+        "search_text",
+    ]
+
+    values = []
+
+    for field in fields:
+        value = product.get(field, "")
+
+        if isinstance(value, list):
+            value = " ".join(str(x) for x in value)
+
+        elif isinstance(value, dict):
+            value = " ".join(
+                f"{k} {v}" for k, v in value.items()
+            )
+
+        values.append(str(value))
+
+    return normalize_text(" ".join(values))
+
+
+# =========================================================
+# Diameter matching
+# =========================================================
+
+def product_matches_diameter(product, diameter):
+    """
+    بررسی می‌کند آیا محصول برای قطر موردنظر مناسب است یا نه.
+
+    مثال:
+
+    محصول:
+    مته 1 تا 13 میلی متر
+
+    سؤال:
+    سوراخ 30 میلی متر
+
+    نتیجه:
+    False
+
+    اما:
+
+    سؤال:
+    سوراخ 10 میلی متر
+
+    نتیجه:
+    True
+    """
+
+    if diameter is None:
         return True
 
-    product_text = normalize(
-        " ".join(
-            [
-                str(product.get("name", "")),
-                str(product.get("category", "")),
-                str(product.get("description", "")),
-                str(product.get("short_description", "")),
-                str(product.get("features", "")),
-                str(product.get("applications", "")),
-                str(product.get("search_text", "")),
-            ]
+    text = get_product_text(product)
+
+    # -----------------------------------------------------
+    # بازه‌ها
+    # مثال:
+    # 1 تا 13 میلی متر
+    # 2-10 میلی متر
+    # 2 - 10 mm
+    # -----------------------------------------------------
+
+    range_patterns = [
+        r"(\d+(?:\.\d+)?)\s*تا\s*(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
+        r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
+    ]
+
+    found_range = False
+
+    for pattern in range_patterns:
+
+        matches = re.findall(pattern, text)
+
+        for min_value, max_value in matches:
+
+            found_range = True
+
+            min_value = float(min_value)
+            max_value = float(max_value)
+
+            if min_value <= diameter <= max_value:
+                return True
+
+    # -----------------------------------------------------
+    # اندازه‌های تکی
+    # مثال:
+    # مته 10 میلی متر
+    # مته 12mm
+    # -----------------------------------------------------
+
+    single_patterns = [
+        r"(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
+    ]
+
+    for pattern in single_patterns:
+
+        matches = re.findall(pattern, text)
+
+        for value in matches:
+
+            value = float(value)
+
+            if abs(value - diameter) < 0.001:
+                return True
+
+    # -----------------------------------------------------
+    # اگر محصول بازه مشخص داشت ولی قطر داخل بازه نبود
+    # -----------------------------------------------------
+
+    if found_range:
+        return False
+
+    # اگر اطلاعات اندازه مشخصی در محصول نبود،
+    # فعلاً محصول را حذف نمی‌کنیم.
+    return True
+
+
+# =========================================================
+# Operation matching
+# =========================================================
+
+def product_matches_intent(product, intent):
+    """
+    بررسی می‌کند محصول با نوع عملیات موردنظر هماهنگ است یا نه.
+    """
+
+    text = get_product_text(product)
+
+    name = normalize_text(product.get("name", ""))
+    category = normalize_text(product.get("category", ""))
+
+    # -----------------------------------------------------
+    # Center drilling
+    # -----------------------------------------------------
+
+    if intent == "center_drilling":
+
+        keywords = [
+            "مته مرغک",
+            "مرغک",
+            "center drill",
+            "center drilling",
+        ]
+
+        return any(
+            word in text
+            for word in keywords
         )
-    )
 
-    keywords = INTENT_PRODUCT_KEYWORDS.get(intent, [])
+    # -----------------------------------------------------
+    # Drilling
+    # -----------------------------------------------------
 
-    for keyword in keywords:
-        if normalize(keyword) in product_text:
-            return True
+    if intent == "drilling":
 
-    return False
+        drilling_keywords = [
+            "مته",
+            "drill",
+            "drilling",
+            "مته hss",
+            "مته کبالت",
+            "مته کارباید",
+        ]
+
+        wrong_keywords = [
+            "قلاویز",
+            "tap",
+            "tapping",
+            "فرز",
+            "تراش",
+            "الماس تراش",
+            "رنده تراش",
+            "مهره",
+            "کولت",
+            "هلدر",
+        ]
+
+        has_drilling = any(
+            word in text
+            for word in drilling_keywords
+        )
+
+        has_wrong = any(
+            word in name or word in category
+            for word in wrong_keywords
+        )
+
+        if has_wrong:
+            return False
+
+        return has_drilling
+
+    # -----------------------------------------------------
+    # Tapping
+    # -----------------------------------------------------
+
+    if intent == "tapping":
+
+        keywords = [
+            "قلاویز",
+            "tap",
+            "tapping",
+            "رزوه داخلی",
+        ]
+
+        return any(
+            word in text
+            for word in keywords
+        )
+
+    # -----------------------------------------------------
+    # Milling
+    # -----------------------------------------------------
+
+    if intent == "milling":
+
+        keywords = [
+            "فرز",
+            "فرزکاری",
+            "milling",
+            "mill",
+            "end mill",
+            "face mill",
+        ]
+
+        return any(
+            word in text
+            for word in keywords
+        )
+
+    # -----------------------------------------------------
+    # Turning
+    # -----------------------------------------------------
+
+    if intent == "turning":
+
+        keywords = [
+            "تراش",
+            "تراشکاری",
+            "الماس تراش",
+            "رنده تراش",
+            "turning",
+            "lathe",
+            "insert",
+        ]
+
+        return any(
+            word in text
+            for word in keywords
+        )
+
+    # -----------------------------------------------------
+    # General
+    # -----------------------------------------------------
+
+    return True
 
 
-# ---------------------------------------------------------
-# Product RAG
-# ---------------------------------------------------------
+# =========================================================
+# RAG Class
+# =========================================================
 
 class ProductRAG:
 
-    def __init__(self):
+    def __init__(
+        self,
+        products_file=PRODUCTS_FILE,
+        knowledge_file=KNOWLEDGE_FILE,
+    ):
 
-        path = PRODUCTS_FILE
+        self.products_file = Path(products_file)
+        self.knowledge_file = Path(knowledge_file)
 
-        if not path.exists():
-
-            alt = path.parent / "products_details.json"
-
-            path = alt if alt.exists() else path
-
-        self.products = (
-            json.loads(path.read_text(encoding="utf-8"))
-            if path.exists()
-            else []
+        self.products = self.load_json(
+            self.products_file
         )
 
-        self.knowledge = []
-
-        if KNOWLEDGE_FILE.exists():
-
-            self.knowledge = json.loads(
-                KNOWLEDGE_FILE.read_text(
-                    encoding="utf-8"
-                )
-            )
+        self.knowledge = self.load_json(
+            self.knowledge_file
+        )
 
         self.documents = [
-            self._to_text(p)
-            for p in self.products
+            get_product_text(product)
+            for product in self.products
         ]
 
-        self.matrix = None
-        self.vectorizer = None
+        self.vectorizer = TfidfVectorizer(
+            analyzer="char_wb",
+            ngram_range=(2, 5),
+            min_df=1,
+        )
 
-        if self.documents and HAS_SKLEARN:
-
-            self.vectorizer = TfidfVectorizer(
-                analyzer="char_wb",
-                ngram_range=(2, 5),
-                min_df=1,
-                sublinear_tf=True,
-            )
-
+        if self.documents:
             self.matrix = self.vectorizer.fit_transform(
                 self.documents
             )
-
-        elif self.documents:
-
-            self._build_simple_index()
-
-
-    # -----------------------------------------------------
-    # Convert product to searchable text
-    # -----------------------------------------------------
-
-    def _to_text(self, p: dict) -> str:
-
-        attrs = (
-            p.get("attributes")
-            or p.get("technical_specs")
-            or {}
-        )
-
-        if isinstance(attrs, dict):
-
-            attrs_t = " ".join(
-                f"{k} {v}"
-                for k, v in attrs.items()
-            )
-
         else:
+            self.matrix = None
 
-            attrs_t = str(attrs)
+    # =====================================================
+    # Load JSON
+    # =====================================================
 
-        def lt(v):
+    @staticmethod
+    def load_json(path):
 
-            if isinstance(v, list):
-                return " ".join(str(x) for x in v)
+        if not path.exists():
+            return []
 
-            return str(v or "")
+        try:
 
-        return normalize(
-            " ".join(
-                [
-                    p.get("name", ""),
-                    p.get("brand", ""),
-                    p.get("sku", ""),
-                    p.get("category", ""),
-                    p.get("price", "")
-                    or p.get("price_text", ""),
-                    p.get("short_description", ""),
-                    p.get("description", ""),
-                    lt(p.get("features")),
-                    lt(p.get("advantages")),
-                    lt(p.get("applications")),
-                    attrs_t,
-                    p.get("search_text", ""),
-                ]
-            )
-        )
+            with open(
+                path,
+                "r",
+                encoding="utf-8",
+            ) as f:
 
+                data = json.load(f)
 
-    # -----------------------------------------------------
-    # Simple fallback index
-    # -----------------------------------------------------
+            if isinstance(data, list):
+                return data
 
-    def _build_simple_index(self):
+            return []
 
-        self._tok_docs = []
+        except Exception as e:
 
-        df = {}
-
-        for doc in self.documents:
-
-            tokens = set(
-                re.findall(
-                    r"[\w\u0600-\u06FF]{2,}",
-                    doc
-                )
+            print(
+                f"Error loading JSON {path}: {e}"
             )
 
-            self._tok_docs.append(
-                Counter(
-                    re.findall(
-                        r"[\w\u0600-\u06FF]{2,}",
-                        doc
-                    )
-                )
-            )
+            return []
 
-            for token in tokens:
-
-                df[token] = (
-                    df.get(token, 0) + 1
-                )
-
-        n = len(self.documents)
-
-        self._idf = {
-            token:
-            math.log(
-                (1 + n) / (1 + count)
-            ) + 1
-
-            for token, count in df.items()
-        }
-
-
-    # -----------------------------------------------------
+    # =====================================================
     # Search
-    # -----------------------------------------------------
+    # =====================================================
 
     def search(
         self,
-        query: str,
-        top_k: int = 5
-    ) -> list[dict]:
+        query,
+        top_k=5,
+    ):
 
         if not self.products:
             return []
 
-        qn = normalize(query)
+        if self.matrix is None:
+            return []
 
-        # ---------------------------------------------
-        # Detect technical intent
-        # ---------------------------------------------
+        query_normalized = normalize_text(query)
 
-        intent = detect_intent(qn)
+        intent = detect_intent(
+            query_normalized
+        )
 
-        # ---------------------------------------------
-        # Candidate products
-        # ---------------------------------------------
+        diameter = extract_diameter(
+            query_normalized
+        )
 
-        candidates = []
+        # -------------------------------------------------
+        # تبدیل سؤال به بردار
+        # -------------------------------------------------
 
-        for index, product in enumerate(self.products):
+        query_vector = self.vectorizer.transform(
+            [query_normalized]
+        )
 
-            if product_matches_intent(
-                product,
-                intent
-            ):
-                candidates.append(index)
+        similarities = cosine_similarity(
+            query_vector,
+            self.matrix,
+        )[0]
 
-        # اگر intent تشخیص داده شد ولی هیچ محصولی
-        # پیدا نشد، جستجوی معمولی را انجام بده
-        if intent and not candidates:
+        # -------------------------------------------------
+        # ساخت نتایج
+        # -------------------------------------------------
 
-            candidates = list(
-                range(len(self.products))
-            )
+        results = []
 
-        # ---------------------------------------------
-        # TF-IDF search
-        # ---------------------------------------------
-
-        if (
-            self.matrix is not None
-            and self.vectorizer is not None
+        for index, product in enumerate(
+            self.products
         ):
 
-            q = self.vectorizer.transform([qn])
+            score = float(
+                similarities[index]
+            )
 
-            scores = cosine_similarity(
-                q,
-                self.matrix
-            ).ravel()
+            # ---------------------------------------------
+            # فیلتر عملیات
+            # ---------------------------------------------
 
-            scored = []
+            if not product_matches_intent(
+                product,
+                intent,
+            ):
+                continue
 
-            for index in candidates:
+            # ---------------------------------------------
+            # فیلتر قطر
+            # ---------------------------------------------
 
-                score = float(
-                    scores[index]
+            if not product_matches_diameter(
+                product,
+                diameter,
+            ):
+                continue
+
+            # ---------------------------------------------
+            # امتیاز عملیات
+            # ---------------------------------------------
+
+            if intent != "general":
+
+                score += 0.15
+
+            # ---------------------------------------------
+            # امتیاز تطبیق قطر
+            # ---------------------------------------------
+
+            if diameter is not None:
+
+                text = get_product_text(
+                    product
                 )
 
-                if score <= 0:
-                    continue
-
-                product = dict(
-                    self.products[index]
+                diameter_text = str(
+                    int(diameter)
+                    if diameter.is_integer()
+                    else diameter
                 )
 
-                # ---------------------------------
-                # Technical intent bonus
-                # ---------------------------------
-
-                if intent and product_matches_intent(
-                    product,
-                    intent
+                if (
+                    diameter_text in text
                 ):
                     score += 0.20
 
-                product["_score"] = round(
-                    score,
-                    4
-                )
-
-                product["_intent"] = intent
-
-                scored.append(product)
-
-            scored.sort(
-                key=lambda x: x["_score"],
-                reverse=True
+            product_copy = dict(
+                product
             )
 
-            return scored[:top_k]
+            product_copy["_score"] = score
+            product_copy["_intent"] = intent
 
-        # ---------------------------------------------
-        # Pure Python fallback
-        # ---------------------------------------------
+            if diameter is not None:
+                product_copy["_diameter"] = diameter
 
-        q_toks = Counter(
-            re.findall(
-                r"[\w\u0600-\u06FF]{2,}",
-                qn
+            results.append(
+                product_copy
             )
+
+        # -------------------------------------------------
+        # مرتب‌سازی
+        # -------------------------------------------------
+
+        results.sort(
+            key=lambda x: x.get(
+                "_score",
+                0
+            ),
+            reverse=True,
         )
 
-        scored = []
+        return results[:top_k]
 
-        for index in candidates:
-
-            tf = self._tok_docs[index]
-
-            score = 0.0
-
-            for token, count in q_toks.items():
-
-                if token in tf:
-
-                    score += (
-                        (1 + math.log(tf[token]))
-                        * self._idf.get(token, 1)
-                        * count
-                    )
-
-            if intent:
-
-                product = self.products[index]
-
-                if product_matches_intent(
-                    product,
-                    intent
-                ):
-                    score += 2.0
-
-            if score > 0:
-
-                product = dict(
-                    self.products[index]
-                )
-
-                product["_score"] = round(
-                    score,
-                    4
-                )
-
-                product["_intent"] = intent
-
-                scored.append(product)
-
-        scored.sort(
-            key=lambda x: x["_score"],
-            reverse=True
-        )
-
-        return scored[:top_k]
-
-
-    # -----------------------------------------------------
-    # Build LLM context
-    # -----------------------------------------------------
+    # =====================================================
+    # Context
+    # =====================================================
 
     def build_context(
         self,
-        hits: list[dict]
-    ) -> str:
+        hits,
+        max_items=5,
+    ):
 
-        blocks = []
+        if not hits:
+            return "محصول مرتبطی پیدا نشد."
 
-        for p in hits:
+        parts = []
 
-            attrs = (
-                p.get("attributes")
-                or p.get("technical_specs")
-                or {}
+        for product in hits[:max_items]:
+
+            parts.append(
+                f"""
+نام محصول: {product.get("name", "")}
+برند: {product.get("brand", "")}
+دسته‌بندی: {product.get("category", "")}
+کد محصول: {product.get("sku", "")}
+توضیحات: {product.get("description", "")}
+ویژگی‌ها: {product.get("features", "")}
+کاربردها: {product.get("applications", "")}
+مشخصات فنی: {product.get("technical_specs", "")}
+امتیاز تطبیق: {product.get("_score", 0):.3f}
+نوع عملیات: {product.get("_intent", "")}
+""".strip()
             )
 
-            if isinstance(attrs, dict):
+        return "\n\n--------------------\n\n".join(
+            parts
+        )
 
-                attrs_text = " | ".join(
-                    f"{k}: {v}"
-                    for k, v in attrs.items()
-                )
 
-            else:
+# =========================================================
+# تست مستقیم فایل
+# =========================================================
 
-                attrs_text = str(
-                    attrs or ""
-                )
+if __name__ == "__main__":
 
-            blocks.append(
+    rag = ProductRAG()
 
-                f"نام محصول: {p.get('name', '')}\n"
+    test_questions = [
+        "برای سوراخ 30 میلی متر روی فولاد چه ابزاری؟",
+        "برای سوراخ 10 میلی متر روی آلومینیوم چه ابزاری مناسب است؟",
+        "برای ایجاد رزوه M10 روی فولاد چه قلاویزی پیشنهاد می کنید؟",
+        "برای شیارزنی روی فولاد چه فرزی مناسب است؟",
+        "برای تراشکاری فولاد چه المانی مناسب است؟",
+    ]
 
-                f"برند: {p.get('brand', '')}\n"
+    for question in test_questions:
 
-                f"SKU: {p.get('sku', '')}\n"
+        print("\n")
+        print("=" * 70)
+        print("QUESTION:")
+        print(question)
+        print("=" * 70)
 
-                f"قیمت: "
-                f"{p.get('price', '') or p.get('price_text', '')}\n"
+        hits = rag.search(
+            question,
+            top_k=5,
+        )
 
-                f"دسته: "
-                f"{p.get('category', '')}\n"
+        for i, hit in enumerate(
+            hits,
+            start=1,
+        ):
 
-                f"امتیاز جستجو: "
-                f"{p.get('_score', '')}\n"
-
-                f"عملیات تشخیص داده‌شده: "
-                f"{p.get('_intent', '')}\n"
-
-                f"توضیحات: "
-                f"{(p.get('description') or p.get('short_description') or '')[:500]}\n"
-
-                f"ویژگی‌ها: "
-                f"{' | '.join(str(x) for x in (p.get('features') or []))}\n"
-
-                f"کاربرد: "
-                f"{' | '.join(str(x) for x in (p.get('applications') or []))}\n"
-
-                f"مشخصات فنی: "
-                f"{attrs_text}\n"
-
-                f"لینک: "
-                f"{p.get('url', '')}"
+            print(
+                f"{i}. "
+                f"{hit.get('name')} | "
+                f"score={hit.get('_score'):.3f} | "
+                f"intent={hit.get('_intent')}"
             )
-
-        return "\n\n---\n\n".join(blocks)
