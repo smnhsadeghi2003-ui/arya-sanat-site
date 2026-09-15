@@ -1,46 +1,28 @@
-from __future__ import annotations
-
 from pathlib import Path
-
-import requests
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from app.consultant import build_advice
 from app.rag import ProductRAG
-
-from app.config import (
-    GROQ_API_KEY,
-    LLM_MODEL,
-    OLLAMA_MODEL,
-    OLLAMA_URL,
-    OPENAI_API_KEY,
-    USE_OLLAMA,
-    XAI_API_KEY,
-)
+from app.consultant import build_advice
 
 
 # =========================================================
-# PATHS
-# =========================================================
-
-BASE = Path(__file__).resolve().parent
-STATIC = BASE / "static"
-
-
-# =========================================================
-# FASTAPI
+# FastAPI
 # =========================================================
 
 apps = FastAPI(
-    title="Arya Sanat AI Consultant",
-    version="1.2.0",
+    title="Micron Tools AI Consultant",
+    version="1.3.0",
+    description="AI Technical Consultant for Micron Tools",
 )
 
+
+# =========================================================
+# CORS
+# =========================================================
 
 apps.add_middleware(
     CORSMiddleware,
@@ -52,6 +34,30 @@ apps.add_middleware(
 
 
 # =========================================================
+# Paths
+# =========================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+
+STATIC_DIR = BASE_DIR / "static"
+
+
+# =========================================================
+# Static Files
+# =========================================================
+
+if STATIC_DIR.exists():
+
+    apps.mount(
+        "/static",
+        StaticFiles(
+            directory=str(STATIC_DIR)
+        ),
+        name="static",
+    )
+
+
+# =========================================================
 # RAG
 # =========================================================
 
@@ -59,269 +65,45 @@ rag = ProductRAG()
 
 
 # =========================================================
-# STATIC FILES
-# =========================================================
-
-if STATIC.exists():
-
-    apps.mount(
-        "/static",
-        StaticFiles(
-            directory=str(STATIC)
-        ),
-        name="static",
-    )
-
-
-# =========================================================
-# REQUEST MODEL
+# Request Model
 # =========================================================
 
 class ChatRequest(BaseModel):
 
-    message: str = Field(
-        min_length=1
-    )
+    message: str
 
-    top_k: int = Field(
-        default=5,
-        ge=1,
-        le=10,
-    )
+    top_k: int = 5
 
 
 # =========================================================
-# OLLAMA
-# =========================================================
-
-def call_ollama(
-    message: str,
-    context: str,
-) -> str | None:
-
-    if not USE_OLLAMA:
-        return None
-
-    prompt = f"""
-تو مشاور فروش و فنی آریا صنعت هستی.
-
-قوانین بسیار مهم:
-
-1. فقط از اطلاعات Context استفاده کن.
-2. هیچ محصولی که در Context نیست اختراع نکن.
-3. اگر سؤال درباره یک عملیات مشخص مثل سوراخکاری است،
-   فقط محصولات مناسب همان عملیات را پیشنهاد بده.
-4. قلاویز برای سوراخکاری پیشنهاد نده.
-5. مته مرغک را برای سوراخکاری اصلی پیشنهاد نده،
-   مگر اینکه کاربر مشخصاً مته مرغک بخواهد.
-6. اگر محصول مناسب در Context وجود ندارد،
-   صادقانه بگو محصول مناسب پیدا نشد.
-7. حداکثر 3 محصول معرفی کن.
-8. پاسخ فارسی، ساده و کوتاه باشد.
-9. برای هر محصول نام، برند، توضیح کوتاه و لینک را بده.
-10. اگر اطلاعات فنی کافی نیست، سؤال تکمیلی بپرس.
-
-سؤال کاربر:
-
-{message}
-
-Context:
-
-{context}
-"""
-
-    try:
-
-        response = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": OLLAMA_MODEL,
-                "prompt": prompt,
-                "stream": False,
-            },
-            timeout=120,
-        )
-
-        response.raise_for_status()
-
-        return (
-            response
-            .json()
-            .get("response")
-            or ""
-        ).strip()
-
-    except Exception:
-
-        return None
-
-
-# =========================================================
-# CLOUD LLM
-# =========================================================
-
-def call_cloud_llm(
-    message: str,
-    context: str,
-) -> str | None:
-
-    api_key = (
-        OPENAI_API_KEY
-        or GROQ_API_KEY
-        or XAI_API_KEY
-    )
-
-    if not api_key:
-        return None
-
-    base_url = (
-        "https://api.openai.com/v1"
-    )
-
-    model = (
-        LLM_MODEL
-        or "gpt-4o-mini"
-    )
-
-    # GROQ
-    if (
-        GROQ_API_KEY
-        and not OPENAI_API_KEY
-    ):
-
-        base_url = (
-            "https://api.groq.com/openai/v1"
-        )
-
-        model = (
-            LLM_MODEL
-            or "llama-3.3-70b-versatile"
-        )
-
-    # XAI
-    if (
-        XAI_API_KEY
-        and not OPENAI_API_KEY
-        and not GROQ_API_KEY
-    ):
-
-        base_url = (
-            "https://api.x.ai/v1"
-        )
-
-        model = (
-            LLM_MODEL
-            or "grok-2-latest"
-        )
-
-    try:
-
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-        )
-
-        system_prompt = """
-تو مشاور فروش و فنی آریا صنعت هستی.
-
-قوانین:
-
-- فقط از Context استفاده کن.
-- محصولی خارج از Context پیشنهاد نده.
-- نوع عملیات کاربر را جدی بگیر.
-- برای سوراخکاری، قلاویز پیشنهاد نده.
-- برای قلاویزکاری، مته معمولی پیشنهاد نده.
-- مته مرغک را فقط برای عملیات مربوط به مرغک پیشنهاد بده.
-- اگر محصول مناسب وجود ندارد، بگو پیدا نشد.
-- حداکثر 3 محصول پیشنهاد بده.
-- فارسی ساده و حرفه‌ای بنویس.
-"""
-
-        response = client.chat.completions.create(
-
-            model=model,
-
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"سؤال کاربر:\n"
-                        f"{message}\n\n"
-                        f"اطلاعات محصولات:\n"
-                        f"{context}"
-                    ),
-                },
-            ],
-
-            temperature=0.2,
-
-            max_tokens=900,
-        )
-
-        return (
-            response
-            .choices[0]
-            .message
-            .content
-            or ""
-        ).strip()
-
-    except Exception:
-
-        return None
-
-
-# =========================================================
-# HOME
+# Root
 # =========================================================
 
 @apps.get("/")
-def home():
-
-    index = STATIC / "index.html"
-
-    if index.exists():
-
-        return FileResponse(index)
+def root():
 
     return {
-        "message": "API آماده است",
-        "docs": "/docs",
+        "name": "Micron Tools AI Consultant",
+        "version": "1.3.0",
+        "status": "running",
     }
 
 
 # =========================================================
-# HEALTH
+# Health
 # =========================================================
 
 @apps.get("/health")
 def health():
 
-    from app.config import llm_status
-
-    status = llm_status()
-
     return {
         "status": "ok",
-        "products": len(
-            rag.products
-        ),
-        "sklearn": (
-            rag.matrix is not None
-        ),
-        "version": "1.2.0",
-        **status,
+        "products": len(rag.products),
     }
 
 
 # =========================================================
-# SEARCH
+# Search
 # =========================================================
 
 @apps.get("/search")
@@ -335,14 +117,76 @@ def search(
         top_k=top_k,
     )
 
+    products = []
+
+    for hit in hits:
+
+        products.append({
+            "name": hit.get(
+                "name",
+                ""
+            ),
+
+            "brand": hit.get(
+                "brand",
+                ""
+            ),
+
+            "sku": hit.get(
+                "sku",
+                ""
+            ),
+
+            "category": hit.get(
+                "category",
+                ""
+            ),
+
+            "price": hit.get(
+                "price",
+                ""
+            ),
+
+            "description": hit.get(
+                "description",
+                ""
+            ),
+
+            "url": hit.get(
+                "url",
+                ""
+            ),
+
+            "image": hit.get(
+                "image",
+                ""
+            ),
+
+            "score": hit.get(
+                "_score",
+                0
+            ),
+
+            "intent": hit.get(
+                "_intent",
+                "general"
+            ),
+
+            "diameter": hit.get(
+                "_diameter",
+                None
+            ),
+        })
+
     return {
         "query": q,
-        "results": hits,
+        "results": products,
+        "count": len(products),
     }
 
 
 # =========================================================
-# CHAT
+# Chat
 # =========================================================
 
 @apps.post("/chat")
@@ -351,8 +195,7 @@ def chat(
 ):
 
     # -----------------------------------------------------
-    # STEP 1
-    # پیدا کردن محصولات مرتبط
+    # Search products
     # -----------------------------------------------------
 
     hits = rag.search(
@@ -360,13 +203,8 @@ def chat(
         top_k=req.top_k,
     )
 
-
     # -----------------------------------------------------
-    # STEP 2
-    # پاسخ اصلی
-    #
-    # فعلاً مستقیم از build_advice استفاده می‌کنیم.
-    # این کار برای تست RAG است.
+    # Build consultant answer
     # -----------------------------------------------------
 
     answer = build_advice(
@@ -374,66 +212,97 @@ def chat(
         hits,
     )
 
-    source = "rag"
-
-
     # -----------------------------------------------------
-    # STEP 3
-    # محصولات خروجی
+    # Prepare products
     # -----------------------------------------------------
 
     products = []
 
-    for h in hits:
+    for hit in hits:
 
-        products.append(
-            {
-                "name": h.get(
-                    "name"
-                ),
+        products.append({
+            "name": hit.get(
+                "name",
+                ""
+            ),
 
-                "brand": h.get(
-                    "brand"
-                ),
+            "brand": hit.get(
+                "brand",
+                ""
+            ),
 
-                "price": (
-                    h.get("price")
-                    or h.get("price_text")
-                ),
+            "sku": hit.get(
+                "sku",
+                ""
+            ),
 
-                "url": h.get(
-                    "url"
-                ),
+            "category": hit.get(
+                "category",
+                ""
+            ),
 
-                "image": h.get(
-                    "image"
-                ),
+            "price": hit.get(
+                "price",
+                ""
+            ),
 
-                "score": h.get(
-                    "_score"
-                ),
+            "description": hit.get(
+                "description",
+                ""
+            ),
 
-                "intent": h.get(
-                    "_intent"
-                ),
-            }
-        )
+            "url": hit.get(
+                "url",
+                ""
+            ),
 
+            "image": hit.get(
+                "image",
+                ""
+            ),
+
+            "score": hit.get(
+                "_score",
+                0
+            ),
+
+            "intent": hit.get(
+                "_intent",
+                "general"
+            ),
+
+            "diameter": hit.get(
+                "_diameter",
+                None
+            ),
+        })
 
     # -----------------------------------------------------
-    # STEP 4
-    # RESPONSE
+    # Response
     # -----------------------------------------------------
 
     return {
-
         "answer": answer,
 
         "products": products,
 
-        "products_found": len(
-            products
-        ),
+        "products_found": len(products),
 
-        "source": source,
+        "source": "rag",
     }
+
+
+# =========================================================
+# Run
+# =========================================================
+
+if __name__ == "__main__":
+
+    import uvicorn
+
+    uvicorn.run(
+        "main:apps",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+    )
