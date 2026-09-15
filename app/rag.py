@@ -9,20 +9,16 @@ from app.config import PRODUCTS_FILE, KNOWLEDGE_FILE
 
 
 # =========================================================
-# Normalization
+# Normalize Persian Text
 # =========================================================
 
 def normalize_text(text):
-    """
-    یکسان‌سازی متن فارسی و اعداد
-    """
-
     if text is None:
         return ""
 
     text = str(text)
 
-    # حروف عربی → فارسی
+    # Arabic → Persian
     text = text.replace("ي", "ی")
     text = text.replace("ى", "ی")
     text = text.replace("ك", "ک")
@@ -30,14 +26,14 @@ def normalize_text(text):
     # حذف نیم‌فاصله
     text = text.replace("\u200c", " ")
 
-    # اعداد فارسی
+    # Persian digits → English
     persian_digits = "۰۱۲۳۴۵۶۷۸۹"
     english_digits = "0123456789"
 
     for p, e in zip(persian_digits, english_digits):
         text = text.replace(p, e)
 
-    # اعداد عربی
+    # Arabic digits → English
     arabic_digits = "٠١٢٣٤٥٦٧٨٩"
 
     for a, e in zip(arabic_digits, english_digits):
@@ -50,7 +46,7 @@ def normalize_text(text):
 
 
 # =========================================================
-# Intent detection
+# Intent Detection
 # =========================================================
 
 def detect_intent(query):
@@ -107,6 +103,7 @@ def detect_intent(query):
         "center drilling",
     ]
 
+    # ترتیب مهم است
     if any(word in q for word in center_drilling_words):
         return "center_drilling"
 
@@ -126,16 +123,16 @@ def detect_intent(query):
 
 
 # =========================================================
-# Diameter extraction
+# Diameter Extraction
 # =========================================================
 
 def extract_diameter(query):
     """
-    استخراج قطر سوراخ از سؤال کاربر.
+    استخراج قطر از سؤال کاربر.
 
     مثال:
     سوراخ 30 میلی متر → 30
-    سوراخ ۱۲ میلی‌متر → 12
+    سوراخ ۳۰ میلی‌متر → 30
     قطر 8mm → 8
     """
 
@@ -147,11 +144,14 @@ def extract_diameter(query):
     ]
 
     for pattern in patterns:
+
         match = re.search(pattern, q)
 
         if match:
+
             try:
                 return float(match.group(1))
+
             except ValueError:
                 return None
 
@@ -159,12 +159,12 @@ def extract_diameter(query):
 
 
 # =========================================================
-# Product text
+# Product Text
 # =========================================================
 
 def get_product_text(product):
     """
-    تمام اطلاعات متنی محصول را برای جستجو ترکیب می‌کند.
+    ترکیب اطلاعات محصول برای جستجوی متنی
     """
 
     fields = [
@@ -186,134 +186,166 @@ def get_product_text(product):
     values = []
 
     for field in fields:
+
         value = product.get(field, "")
 
         if isinstance(value, list):
-            value = " ".join(str(x) for x in value)
 
-        elif isinstance(value, dict):
             value = " ".join(
-                f"{k} {v}" for k, v in value.items()
+                str(x)
+                for x in value
             )
 
-        values.append(str(value))
+        elif isinstance(value, dict):
 
-    return normalize_text(" ".join(values))
+            value = " ".join(
+                f"{k} {v}"
+                for k, v in value.items()
+            )
+
+        values.append(
+            str(value)
+        )
+
+    return normalize_text(
+        " ".join(values)
+    )
 
 
 # =========================================================
-# Diameter matching
+# Extract Product Diameter Information
 # =========================================================
 
-def product_matches_diameter(product, diameter):
-    """
-    بررسی می‌کند آیا محصول برای قطر موردنظر مناسب است یا نه.
-
-    مثال:
-
-    محصول:
-    مته 1 تا 13 میلی متر
-
-    سؤال:
-    سوراخ 30 میلی متر
-
-    نتیجه:
-    False
-
-    اما:
-
-    سؤال:
-    سوراخ 10 میلی متر
-
-    نتیجه:
-    True
-    """
-
-    if diameter is None:
-        return True
+def extract_product_diameters(product):
 
     text = get_product_text(product)
 
-    # -----------------------------------------------------
-    # بازه‌ها
+    ranges = []
+    singles = []
+
+    # ---------------------------------------------
+    # Range
     # مثال:
     # 1 تا 13 میلی متر
     # 2-10 میلی متر
-    # 2 - 10 mm
-    # -----------------------------------------------------
+    # ---------------------------------------------
 
     range_patterns = [
         r"(\d+(?:\.\d+)?)\s*تا\s*(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
         r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
     ]
 
-    found_range = False
-
     for pattern in range_patterns:
 
-        matches = re.findall(pattern, text)
+        matches = re.findall(
+            pattern,
+            text
+        )
 
         for min_value, max_value in matches:
 
-            found_range = True
+            ranges.append(
+                (
+                    float(min_value),
+                    float(max_value)
+                )
+            )
 
-            min_value = float(min_value)
-            max_value = float(max_value)
+    # ---------------------------------------------
+    # Single diameter
+    # ---------------------------------------------
+
+    single_pattern = (
+        r"(\d+(?:\.\d+)?)"
+        r"\s*(?:میلی\s*متر|میلیمتر|mm)"
+    )
+
+    matches = re.findall(
+        single_pattern,
+        text
+    )
+
+    for value in matches:
+
+        value = float(value)
+
+        singles.append(value)
+
+    return ranges, singles
+
+
+# =========================================================
+# Diameter Matching
+# =========================================================
+
+def product_matches_diameter(product, diameter):
+    """
+    بررسی تطبیق قطر محصول با قطر درخواست‌شده.
+    """
+
+    if diameter is None:
+        return True
+
+    ranges, singles = extract_product_diameters(
+        product
+    )
+
+    # ---------------------------------------------
+    # اگر بازه مشخص دارد
+    # ---------------------------------------------
+
+    if ranges:
+
+        for min_value, max_value in ranges:
 
             if min_value <= diameter <= max_value:
                 return True
 
-    # -----------------------------------------------------
-    # اندازه‌های تکی
-    # مثال:
-    # مته 10 میلی متر
-    # مته 12mm
-    # -----------------------------------------------------
+        # اگر قطر خارج از همه بازه‌هاست
+        return False
 
-    single_patterns = [
-        r"(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
-    ]
+    # ---------------------------------------------
+    # اگر سایز تکی دارد
+    # ---------------------------------------------
 
-    for pattern in single_patterns:
+    if singles:
 
-        matches = re.findall(pattern, text)
-
-        for value in matches:
-
-            value = float(value)
+        for value in singles:
 
             if abs(value - diameter) < 0.001:
                 return True
 
-    # -----------------------------------------------------
-    # اگر محصول بازه مشخص داشت ولی قطر داخل بازه نبود
-    # -----------------------------------------------------
-
-    if found_range:
         return False
 
-    # اگر اطلاعات اندازه مشخصی در محصول نبود،
-    # فعلاً محصول را حذف نمی‌کنیم.
-    return True
+    # ---------------------------------------------
+    # اگر هیچ اطلاعات قطری ندارد
+    # ---------------------------------------------
+
+    return False
 
 
 # =========================================================
-# Operation matching
+# Operation Matching
 # =========================================================
 
 def product_matches_intent(product, intent):
     """
-    بررسی می‌کند محصول با نوع عملیات موردنظر هماهنگ است یا نه.
+    بررسی ارتباط محصول با عملیات موردنظر.
     """
 
     text = get_product_text(product)
 
-    name = normalize_text(product.get("name", ""))
-    category = normalize_text(product.get("category", ""))
+    name = normalize_text(
+        product.get("name", "")
+    )
 
-    # -----------------------------------------------------
-    # Center drilling
-    # -----------------------------------------------------
+    category = normalize_text(
+        product.get("category", "")
+    )
+
+    # =====================================================
+    # Center Drilling
+    # =====================================================
 
     if intent == "center_drilling":
 
@@ -329,52 +361,54 @@ def product_matches_intent(product, intent):
             for word in keywords
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # Drilling
-    # -----------------------------------------------------
+    # =====================================================
 
     if intent == "drilling":
 
-        drilling_keywords = [
-            "مته",
-            "drill",
-            "drilling",
-            "مته hss",
-            "مته کبالت",
-            "مته کارباید",
-        ]
-
-        wrong_keywords = [
-            "قلاویز",
-            "tap",
-            "tapping",
-            "فرز",
-            "تراش",
-            "الماس تراش",
-            "رنده تراش",
+        # محصولات نامرتبط
+        wrong_product_keywords = [
+            "دستگاه مته تیز کن",
+            "دستگاه مته تیزکنی",
+            "دستگاه ابزار تیز کن",
+            "دستگاه ابزار تیزکنی",
+            "ابزار تیز کن",
+            "ابزار تیزکنی",
+            "تیز کردن مته",
             "مهره",
             "کولت",
             "هلدر",
+            "قلاویز",
+            "فرز",
+            "الماس تراش",
+            "رنده تراش",
         ]
 
-        has_drilling = any(
-            word in text
-            for word in drilling_keywords
-        )
-
-        has_wrong = any(
+        if any(
             word in name or word in category
-            for word in wrong_keywords
-        )
-
-        if has_wrong:
+            for word in wrong_product_keywords
+        ):
             return False
 
-        return has_drilling
+        # برای سوراخ‌کاری باید خود محصول مته باشد
+        drilling_product_keywords = [
+            "مته",
+            "drill",
+            "drilling",
+        ]
 
-    # -----------------------------------------------------
+        if not any(
+            word in name
+            for word in drilling_product_keywords
+        ):
+            return False
+
+        return True
+
+    # =====================================================
     # Tapping
-    # -----------------------------------------------------
+    # =====================================================
 
     if intent == "tapping":
 
@@ -390,9 +424,9 @@ def product_matches_intent(product, intent):
             for word in keywords
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # Milling
-    # -----------------------------------------------------
+    # =====================================================
 
     if intent == "milling":
 
@@ -410,9 +444,9 @@ def product_matches_intent(product, intent):
             for word in keywords
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # Turning
-    # -----------------------------------------------------
+    # =====================================================
 
     if intent == "turning":
 
@@ -431,15 +465,15 @@ def product_matches_intent(product, intent):
             for word in keywords
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # General
-    # -----------------------------------------------------
+    # =====================================================
 
     return True
 
 
 # =========================================================
-# RAG Class
+# Product RAG
 # =========================================================
 
 class ProductRAG:
@@ -450,8 +484,17 @@ class ProductRAG:
         knowledge_file=KNOWLEDGE_FILE,
     ):
 
-        self.products_file = Path(products_file)
-        self.knowledge_file = Path(knowledge_file)
+        self.products_file = Path(
+            products_file
+        )
+
+        self.knowledge_file = Path(
+            knowledge_file
+        )
+
+        # ---------------------------------------------
+        # Load data
+        # ---------------------------------------------
 
         self.products = self.load_json(
             self.products_file
@@ -461,10 +504,18 @@ class ProductRAG:
             self.knowledge_file
         )
 
+        # ---------------------------------------------
+        # Documents
+        # ---------------------------------------------
+
         self.documents = [
             get_product_text(product)
             for product in self.products
         ]
+
+        # ---------------------------------------------
+        # TF-IDF
+        # ---------------------------------------------
 
         self.vectorizer = TfidfVectorizer(
             analyzer="char_wb",
@@ -473,10 +524,15 @@ class ProductRAG:
         )
 
         if self.documents:
-            self.matrix = self.vectorizer.fit_transform(
-                self.documents
+
+            self.matrix = (
+                self.vectorizer.fit_transform(
+                    self.documents
+                )
             )
+
         else:
+
             self.matrix = None
 
     # =====================================================
@@ -487,6 +543,11 @@ class ProductRAG:
     def load_json(path):
 
         if not path.exists():
+
+            print(
+                f"JSON file not found: {path}"
+            )
+
             return []
 
         try:
@@ -528,22 +589,34 @@ class ProductRAG:
         if self.matrix is None:
             return []
 
-        query_normalized = normalize_text(query)
+        query_normalized = normalize_text(
+            query
+        )
+
+        # ---------------------------------------------
+        # Detect intent
+        # ---------------------------------------------
 
         intent = detect_intent(
             query_normalized
         )
 
+        # ---------------------------------------------
+        # Extract diameter
+        # ---------------------------------------------
+
         diameter = extract_diameter(
             query_normalized
         )
 
-        # -------------------------------------------------
-        # تبدیل سؤال به بردار
-        # -------------------------------------------------
+        # ---------------------------------------------
+        # Query vector
+        # ---------------------------------------------
 
-        query_vector = self.vectorizer.transform(
-            [query_normalized]
+        query_vector = (
+            self.vectorizer.transform(
+                [query_normalized]
+            )
         )
 
         similarities = cosine_similarity(
@@ -551,11 +624,11 @@ class ProductRAG:
             self.matrix,
         )[0]
 
-        # -------------------------------------------------
-        # ساخت نتایج
-        # -------------------------------------------------
-
         results = []
+
+        # =================================================
+        # Process products
+        # =================================================
 
         for index, product in enumerate(
             self.products
@@ -566,7 +639,7 @@ class ProductRAG:
             )
 
             # ---------------------------------------------
-            # فیلتر عملیات
+            # Operation filter
             # ---------------------------------------------
 
             if not product_matches_intent(
@@ -576,17 +649,19 @@ class ProductRAG:
                 continue
 
             # ---------------------------------------------
-            # فیلتر قطر
+            # Diameter filter
             # ---------------------------------------------
 
-            if not product_matches_diameter(
-                product,
-                diameter,
-            ):
-                continue
+            if diameter is not None:
+
+                if not product_matches_diameter(
+                    product,
+                    diameter,
+                ):
+                    continue
 
             # ---------------------------------------------
-            # امتیاز عملیات
+            # Operation bonus
             # ---------------------------------------------
 
             if intent != "general":
@@ -594,43 +669,57 @@ class ProductRAG:
                 score += 0.15
 
             # ---------------------------------------------
-            # امتیاز تطبیق قطر
+            # Diameter bonus
             # ---------------------------------------------
 
             if diameter is not None:
 
-                text = get_product_text(
-                    product
+                ranges, singles = (
+                    extract_product_diameters(
+                        product
+                    )
                 )
 
-                diameter_text = str(
-                    int(diameter)
-                    if diameter.is_integer()
-                    else diameter
-                )
+                diameter_match = False
 
-                if (
-                    diameter_text in text
-                ):
-                    score += 0.20
+                for min_value, max_value in ranges:
+
+                    if min_value <= diameter <= max_value:
+                        diameter_match = True
+
+                for value in singles:
+
+                    if abs(
+                        value - diameter
+                    ) < 0.001:
+                        diameter_match = True
+
+                if diameter_match:
+                    score += 0.30
+
+            # ---------------------------------------------
+            # Save result
+            # ---------------------------------------------
 
             product_copy = dict(
                 product
             )
 
             product_copy["_score"] = score
+
             product_copy["_intent"] = intent
 
             if diameter is not None:
+
                 product_copy["_diameter"] = diameter
 
             results.append(
                 product_copy
             )
 
-        # -------------------------------------------------
-        # مرتب‌سازی
-        # -------------------------------------------------
+        # =================================================
+        # Sort
+        # =================================================
 
         results.sort(
             key=lambda x: x.get(
@@ -643,7 +732,7 @@ class ProductRAG:
         return results[:top_k]
 
     # =====================================================
-    # Context
+    # Build Context
     # =====================================================
 
     def build_context(
@@ -653,7 +742,10 @@ class ProductRAG:
     ):
 
         if not hits:
-            return "محصول مرتبطی پیدا نشد."
+
+            return (
+                "محصول مرتبطی پیدا نشد."
+            )
 
         parts = []
 
@@ -669,18 +761,21 @@ class ProductRAG:
 ویژگی‌ها: {product.get("features", "")}
 کاربردها: {product.get("applications", "")}
 مشخصات فنی: {product.get("technical_specs", "")}
-امتیاز تطبیق: {product.get("_score", 0):.3f}
-نوع عملیات: {product.get("_intent", "")}
+امتیاز: {product.get("_score", 0):.3f}
+عملیات: {product.get("_intent", "")}
+قطر درخواست‌شده: {product.get("_diameter", "")}
 """.strip()
             )
 
-        return "\n\n--------------------\n\n".join(
-            parts
-        )
+        return (
+            "\n\n"
+            "--------------------"
+            "\n\n"
+        ).join(parts)
 
 
 # =========================================================
-# تست مستقیم فایل
+# Direct Test
 # =========================================================
 
 if __name__ == "__main__":
@@ -688,25 +783,43 @@ if __name__ == "__main__":
     rag = ProductRAG()
 
     test_questions = [
+
         "برای سوراخ 30 میلی متر روی فولاد چه ابزاری؟",
+
         "برای سوراخ 10 میلی متر روی آلومینیوم چه ابزاری مناسب است؟",
+
         "برای ایجاد رزوه M10 روی فولاد چه قلاویزی پیشنهاد می کنید؟",
+
         "برای شیارزنی روی فولاد چه فرزی مناسب است؟",
+
         "برای تراشکاری فولاد چه المانی مناسب است؟",
+
+        "برای سوراخ کاری چه ابزاری خوبه؟",
+
     ]
 
     for question in test_questions:
 
         print("\n")
         print("=" * 70)
-        print("QUESTION:")
-        print(question)
+
+        print(
+            "QUESTION:",
+            question
+        )
+
         print("=" * 70)
 
         hits = rag.search(
             question,
             top_k=5,
         )
+
+        if not hits:
+
+            print(
+                "هیچ محصول مناسبی پیدا نشد."
+            )
 
         for i, hit in enumerate(
             hits,
@@ -716,6 +829,7 @@ if __name__ == "__main__":
             print(
                 f"{i}. "
                 f"{hit.get('name')} | "
-                f"score={hit.get('_score'):.3f} | "
-                f"intent={hit.get('_intent')}"
+                f"score={hit.get('_score', 0):.3f} | "
+                f"intent={hit.get('_intent')} | "
+                f"diameter={hit.get('_diameter', '')}"
             )
