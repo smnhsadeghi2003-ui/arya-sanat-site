@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,6 +8,15 @@ from pydantic import BaseModel
 
 from app.rag import ProductRAG
 from app.consultant import build_advice
+from app.llm import generate_llm_answer
+
+
+# =========================================================
+# Paths
+# =========================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
 
 
 # =========================================================
@@ -15,8 +25,8 @@ from app.consultant import build_advice
 
 apps = FastAPI(
     title="Micron Tools AI Consultant",
-    version="1.3.0",
-    description="AI Technical Consultant for Micron Tools",
+    version="1.4.0",
+    description="RAG + LLM technical consultant for industrial tools",
 )
 
 
@@ -27,23 +37,14 @@ apps = FastAPI(
 apps.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 # =========================================================
-# Paths
-# =========================================================
-
-BASE_DIR = Path(__file__).resolve().parent
-
-STATIC_DIR = BASE_DIR / "static"
-
-
-# =========================================================
-# Static Files
+# Static
 # =========================================================
 
 if STATIC_DIR.exists():
@@ -65,13 +66,12 @@ rag = ProductRAG()
 
 
 # =========================================================
-# Request Model
+# Request model
 # =========================================================
 
 class ChatRequest(BaseModel):
 
     message: str
-
     top_k: int = 5
 
 
@@ -83,9 +83,10 @@ class ChatRequest(BaseModel):
 def root():
 
     return {
-        "name": "Micron Tools AI Consultant",
-        "version": "1.3.0",
-        "status": "running",
+        "status": "ok",
+        "message": "Micron Tools AI Consultant is running.",
+        "docs": "/docs",
+        "health": "/health",
     }
 
 
@@ -106,82 +107,17 @@ def health():
 # Search
 # =========================================================
 
-@apps.get("/search")
-def search(
-    q: str,
-    top_k: int = 5,
-):
+@apps.post("/search")
+def search(req: ChatRequest):
 
     hits = rag.search(
-        q,
-        top_k=top_k,
+        req.message,
+        top_k=req.top_k,
     )
 
-    products = []
-
-    for hit in hits:
-
-        products.append({
-            "name": hit.get(
-                "name",
-                ""
-            ),
-
-            "brand": hit.get(
-                "brand",
-                ""
-            ),
-
-            "sku": hit.get(
-                "sku",
-                ""
-            ),
-
-            "category": hit.get(
-                "category",
-                ""
-            ),
-
-            "price": hit.get(
-                "price",
-                ""
-            ),
-
-            "description": hit.get(
-                "description",
-                ""
-            ),
-
-            "url": hit.get(
-                "url",
-                ""
-            ),
-
-            "image": hit.get(
-                "image",
-                ""
-            ),
-
-            "score": hit.get(
-                "_score",
-                0
-            ),
-
-            "intent": hit.get(
-                "_intent",
-                "general"
-            ),
-
-            "diameter": hit.get(
-                "_diameter",
-                None
-            ),
-        })
-
     return {
-        "query": q,
-        "results": products,
-        "count": len(products),
+        "query": req.message,
+        "results": hits,
     }
 
 
@@ -190,12 +126,10 @@ def search(
 # =========================================================
 
 @apps.post("/chat")
-def chat(
-    req: ChatRequest,
-):
+def chat(req: ChatRequest):
 
     # -----------------------------------------------------
-    # Search products
+    # 1. RAG retrieval
     # -----------------------------------------------------
 
     hits = rag.search(
@@ -204,91 +138,68 @@ def chat(
     )
 
     # -----------------------------------------------------
-    # Build consultant answer
+    # 2. Build deterministic fallback
     # -----------------------------------------------------
 
-    answer = build_advice(
+    rag_answer = build_advice(
         req.message,
         hits,
     )
 
     # -----------------------------------------------------
-    # Prepare products
+    # 3. If no products were found
+    #
+    # Don't call LLM to invent products.
     # -----------------------------------------------------
 
-    products = []
+    if not hits:
 
-    for hit in hits:
-
-        products.append({
-            "name": hit.get(
-                "name",
-                ""
-            ),
-
-            "brand": hit.get(
-                "brand",
-                ""
-            ),
-
-            "sku": hit.get(
-                "sku",
-                ""
-            ),
-
-            "category": hit.get(
-                "category",
-                ""
-            ),
-
-            "price": hit.get(
-                "price",
-                ""
-            ),
-
-            "description": hit.get(
-                "description",
-                ""
-            ),
-
-            "url": hit.get(
-                "url",
-                ""
-            ),
-
-            "image": hit.get(
-                "image",
-                ""
-            ),
-
-            "score": hit.get(
-                "_score",
-                0
-            ),
-
-            "intent": hit.get(
-                "_intent",
-                "general"
-            ),
-
-            "diameter": hit.get(
-                "_diameter",
-                None
-            ),
-        })
+        return {
+            "answer": rag_answer,
+            "products": [],
+            "products_found": 0,
+            "source": "rag",
+        }
 
     # -----------------------------------------------------
-    # Response
+    # 4. Build context
+    # -----------------------------------------------------
+
+    context = rag.build_context(
+        hits
+    )
+
+    # -----------------------------------------------------
+    # 5. Ask LLM to explain ONLY the RAG results
+    # -----------------------------------------------------
+
+    llm_answer = generate_llm_answer(
+        req.message,
+        context,
+    )
+
+    # -----------------------------------------------------
+    # 6. Fallback if LLM unavailable
+    # -----------------------------------------------------
+
+    if not llm_answer:
+
+        return {
+            "answer": rag_answer,
+            "products": hits[:3],
+            "products_found": len(hits),
+            "source": "rag_fallback",
+        }
+
+    # -----------------------------------------------------
+    # 7. Final answer
     # -----------------------------------------------------
 
     return {
-        "answer": answer,
-
-        "products": products,
-
-        "products_found": len(products),
-
-        "source": "rag",
+        "answer": llm_answer,
+        "products": hits[:3],
+        "products_found": len(hits),
+        "source": "rag+llm",
     }
 
 
@@ -297,8 +208,6 @@ def chat(
 # =========================================================
 
 if __name__ == "__main__":
-
-    import uvicorn
 
     uvicorn.run(
         "main:apps",

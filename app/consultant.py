@@ -1,7 +1,12 @@
 import re
 
 
+# =========================================================
+# Normalize text
+# =========================================================
+
 def normalize_text(text):
+
     if text is None:
         return ""
 
@@ -12,12 +17,14 @@ def normalize_text(text):
     text = text.replace("ك", "ک")
     text = text.replace("\u200c", " ")
 
+    # Persian digits -> English
     persian_digits = "۰۱۲۳۴۵۶۷۸۹"
     english_digits = "0123456789"
 
     for p, e in zip(persian_digits, english_digits):
         text = text.replace(p, e)
 
+    # Arabic digits -> English
     arabic_digits = "٠١٢٣٤٥٦٧٨٩"
 
     for a, e in zip(arabic_digits, english_digits):
@@ -28,9 +35,15 @@ def normalize_text(text):
     return text.strip().lower()
 
 
+# =========================================================
+# Detect operation
+# =========================================================
+
 def detect_operation(message):
+
     q = normalize_text(message)
 
+    # Center drilling
     if any(x in q for x in [
         "مته مرغک",
         "مرغک",
@@ -41,6 +54,7 @@ def detect_operation(message):
     ]):
         return "center_drilling"
 
+    # Tapping
     if any(x in q for x in [
         "قلاویز",
         "قلاویزکاری",
@@ -52,6 +66,7 @@ def detect_operation(message):
     ]):
         return "tapping"
 
+    # Milling
     if any(x in q for x in [
         "فرز",
         "فرزکاری",
@@ -62,6 +77,7 @@ def detect_operation(message):
     ]):
         return "milling"
 
+    # Turning
     if any(x in q for x in [
         "تراش",
         "تراشکاری",
@@ -73,6 +89,7 @@ def detect_operation(message):
     ]):
         return "turning"
 
+    # Drilling
     if any(x in q for x in [
         "سوراخ",
         "سوراخکاری",
@@ -86,29 +103,57 @@ def detect_operation(message):
     return "general"
 
 
+# =========================================================
+# Extract diameter
+# =========================================================
+
 def extract_diameter(message):
+
     q = normalize_text(message)
 
     patterns = [
+
         r"(?:سوراخ|قطر)\s*(?:با\s*)?(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
+
         r"(\d+(?:\.\d+)?)\s*(?:میلی\s*متر|میلیمتر|mm)",
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, q)
+
+        match = re.search(
+            pattern,
+            q
+        )
 
         if match:
+
             try:
-                return float(match.group(1))
+                return float(
+                    match.group(1)
+                )
+
             except ValueError:
                 return None
 
     return None
 
 
-def product_matches_operation(product, operation):
-    name = normalize_text(product.get("name", ""))
-    category = normalize_text(product.get("category", ""))
+# =========================================================
+# Check operation for returned products
+# =========================================================
+
+def product_matches_operation(
+    product,
+    operation,
+):
+
+    name = normalize_text(
+        product.get("name", "")
+    )
+
+    category = normalize_text(
+        product.get("category", "")
+    )
 
     text = normalize_text(
         " ".join([
@@ -120,7 +165,12 @@ def product_matches_operation(product, operation):
         ])
     )
 
+    # =====================================================
+    # Center drilling
+    # =====================================================
+
     if operation == "center_drilling":
+
         return any(
             x in text
             for x in [
@@ -130,6 +180,10 @@ def product_matches_operation(product, operation):
                 "center drilling",
             ]
         )
+
+    # =====================================================
+    # Drilling
+    # =====================================================
 
     if operation == "drilling":
 
@@ -165,7 +219,12 @@ def product_matches_operation(product, operation):
             ]
         )
 
+    # =====================================================
+    # Tapping
+    # =====================================================
+
     if operation == "tapping":
+
         return any(
             x in text
             for x in [
@@ -176,7 +235,12 @@ def product_matches_operation(product, operation):
             ]
         )
 
+    # =====================================================
+    # Milling
+    # =====================================================
+
     if operation == "milling":
+
         return any(
             x in text
             for x in [
@@ -189,7 +253,12 @@ def product_matches_operation(product, operation):
             ]
         )
 
+    # =====================================================
+    # Turning
+    # =====================================================
+
     if operation == "turning":
+
         return any(
             x in text
             for x in [
@@ -206,25 +275,47 @@ def product_matches_operation(product, operation):
     return True
 
 
-def build_advice(message, hits):
-    operation = detect_operation(message)
-    diameter = extract_diameter(message)
+# =========================================================
+# Build final advice
+# =========================================================
+
+def build_advice(
+    message,
+    hits,
+):
+
+    operation = detect_operation(
+        message
+    )
+
+    diameter = extract_diameter(
+        message
+    )
+
+    # -----------------------------------------------------
+    # Filter the retrieved products again
+    # -----------------------------------------------------
 
     valid_hits = []
 
     for product in hits:
-        if product_matches_operation(product, operation):
+
+        if product_matches_operation(
+            product,
+            operation,
+        ):
             valid_hits.append(product)
 
-    # -----------------------------------------
-    # وقتی محصول مناسب پیدا نشده
-    # -----------------------------------------
+    # =====================================================
+    # No result
+    # =====================================================
 
     if not valid_hits:
 
         if operation == "drilling":
 
             if diameter is not None:
+
                 return (
                     f"برای سوراخ‌کاری با قطر "
                     f"{diameter:g} میلی‌متر، "
@@ -244,9 +335,9 @@ def build_advice(message, hits):
             "در اطلاعات فعلی پیدا نکردم."
         )
 
-    # -----------------------------------------
-    # پاسخ سلام
-    # -----------------------------------------
+    # =====================================================
+    # Greeting
+    # =====================================================
 
     q = normalize_text(message)
 
@@ -257,68 +348,75 @@ def build_advice(message, hits):
             "درود",
             "hello",
             "hi",
-            "salam",
-            "slm"
         ]
     ):
+
         return (
             "سلام 🌷\n"
             "من مشاور تخصصی ابزارهای صنعتی هستم. "
             "سؤال خود را درباره انتخاب ابزار بپرسید."
         )
 
-    # -----------------------------------------
-    # ساخت پاسخ
-    # -----------------------------------------
+    # =====================================================
+    # Response heading
+    # =====================================================
 
     lines = []
 
     if operation == "drilling":
 
         if diameter is not None:
+
             lines.append(
                 f"برای سوراخ‌کاری با قطر "
                 f"{diameter:g} میلی‌متر، "
                 f"محصولات مرتبط موجود در سیستم:"
             )
+
         else:
+
             lines.append(
                 "برای سوراخ‌کاری، "
                 "محصولات مرتبط موجود در سیستم:"
             )
 
     elif operation == "tapping":
+
         lines.append(
             "برای قلاویزکاری، "
             "محصولات مرتبط:"
         )
 
     elif operation == "milling":
+
         lines.append(
             "برای فرزکاری، "
             "محصولات مرتبط:"
         )
 
     elif operation == "turning":
+
         lines.append(
             "برای تراشکاری، "
             "محصولات مرتبط:"
         )
 
     elif operation == "center_drilling":
+
         lines.append(
             "برای سوراخ‌مرکزی، "
             "محصولات مرتبط:"
         )
 
     else:
+
         lines.append(
             "محصولات مرتبط با درخواست شما:"
         )
 
-    # -----------------------------------------
-    # نمایش محصولات
-    # -----------------------------------------
+    # =====================================================
+    # Products
+    # =====================================================
 
     for index, product in enumerate(
         valid_hits[:3],
@@ -350,11 +448,12 @@ def build_advice(message, hits):
 
         lines.append(line)
 
-    # -----------------------------------------
-    # نکته تخصصی
-    # -----------------------------------------
+    # =====================================================
+    # Technical note
+    # =====================================================
 
     if operation == "drilling":
+
         lines.append(
             "\nنکته: برای انتخاب دقیق مته، "
             "قطر سوراخ، جنس قطعه، "
@@ -363,6 +462,7 @@ def build_advice(message, hits):
         )
 
     elif operation == "tapping":
+
         lines.append(
             "\nنکته: برای انتخاب قلاویز، "
             "سایز رزوه، گام رزوه، "
@@ -371,6 +471,7 @@ def build_advice(message, hits):
         )
 
     elif operation == "milling":
+
         lines.append(
             "\nنکته: برای انتخاب فرز، "
             "جنس قطعه، نوع شیار، "
@@ -379,6 +480,7 @@ def build_advice(message, hits):
         )
 
     elif operation == "turning":
+
         lines.append(
             "\nنکته: برای انتخاب الماس تراش، "
             "جنس قطعه، نوع عملیات و "
@@ -388,16 +490,25 @@ def build_advice(message, hits):
     return "\n".join(lines)
 
 
-# -----------------------------------------
-# تست مستقیم فایل
-# -----------------------------------------
+# =========================================================
+# Direct test
+# =========================================================
 
 if __name__ == "__main__":
 
-    question = "برای سوراخ 30 میلی متر روی فولاد چه ابزاری؟"
+    question = (
+        "برای سوراخ 30 میلی متر روی فولاد چه ابزاری؟"
+    )
 
-    print("Operation:", detect_operation(question))
-    print("Diameter:", extract_diameter(question))
+    print(
+        "Operation:",
+        detect_operation(question)
+    )
+
+    print(
+        "Diameter:",
+        extract_diameter(question)
+    )
 
     print(
         build_advice(
